@@ -1,0 +1,10 @@
+build:
+    only:
+        - tags
+    tags:
+        - macOS
+        - Vuo
+    script:
+        - conan config install https://vuo.org/sites/default/files/conan-macos.zip
+        - conan create . vuo+conan+wuquant/stable
+        - CONAN_LOGIN_USERNAME=ci_user CONAN_PASSWORD=${CI_JOB_TOKEN} conan upload --remote vuo --all --no-overwrite all --confirm wuquant/*@vuo+conan+wuquant/stable

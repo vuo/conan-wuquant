@@ -20,7 +20,9 @@ additional documentation and a cure to a previous bug.
 Free to distribute, comments and suggestions are appreciated.
 **********************************************************************/
 
-#include<stdio.h>
+#include "wuquant.h"
+#include <stdio.h>
+#include <stdlib.h>
 
 #define MAXCOLOR	256
 #define	RED	2
@@ -37,37 +39,23 @@ struct box {
     int vol;
 };
 
-/* Histogram is in elements 1..HISTSIZE along each axis,
- * element 0 is for base or marginal value
- * NB: these must start out 0!
- */
-
-float		m2[33][33][33];
-long int	wt[33][33][33], mr[33][33][33],	mg[33][33][33],	mb[33][33][33];
-unsigned char   *Ir, *Ig, *Ib;
-int	        size; /*image size*/
-int		K;    /*color look-up table size*/
-unsigned short int *Qadd;
-
-void
-Hist3d(vwt, vmr, vmg, vmb, m2)
+static void
+Hist3d(unsigned char *imageData, unsigned int pixelCount, long int *vwt, long int *vmr, long int *vmg, long int *vmb, float *m2)
 /* build 3-D color histogram of counts, r/g/b, c^2 */
-long int *vwt, *vmr, *vmg, *vmb;
-float	*m2;
 {
 register int ind, r, g, b;
 int	     inr, ing, inb, table[256];
 register long int i;
 
 	for(i=0; i<256; ++i) table[i]=i*i;
-	Qadd = (unsigned short int *)malloc(sizeof(short int)*size);
-	if (Qadd==NULL) {printf("Not enough space\n"); exit(1);}
-	for(i=0; i<size; ++i){
-	    r = Ir[i]; g = Ig[i]; b = Ib[i];
+	for(i=0; i<pixelCount; ++i){
+	    r = imageData[i * 3 + 0];
+	    g = imageData[i * 3 + 1];
+	    b = imageData[i * 3 + 2];
 	    inr=(r>>3)+1;
 	    ing=(g>>3)+1;
 	    inb=(b>>3)+1;
-	    Qadd[i]=ind=(inr<<10)+(inr<<6)+inr+(ing<<5)+ing+inb;
+	    ind=(inr<<10)+(inr<<6)+inr+(ing<<5)+ing+inb;
 	    /*[inr][ing][inb]*/
 	    ++vwt[ind];
 	    vmr[ind] += r;
@@ -81,7 +69,7 @@ register long int i;
  *   wt[r][g][b] = sum over voxel of P(c)
  *   mr[r][g][b] = sum over voxel of r*P(c)  ,  similarly for mg, mb
  *   m2[r][g][b] = sum over voxel of c^2*P(c)
- * Actually each of these should be divided by 'size' to give the usual
+ * Actually each of these should be divided by 'pixelCount' to give the usual
  * interpretation of P() as ranging from 0 to 1, but we needn't do that here.
  */
 
@@ -90,7 +78,7 @@ register long int i;
  */
 
 
-void
+static void
 M3d(vwt, vmr, vmg, vmb, m2) /* compute cumulative moments. */
 long int *vwt, *vmr, *vmg, *vmb;
 float	*m2;
@@ -130,19 +118,17 @@ float    line2, area2[33];
 }
 
 
-long int Vol(cube, mmt)
+static long int Vol(struct box *cube, long int *mmt)
 /* Compute sum over a box of any given statistic */
-struct box *cube;
-long int mmt[33][33][33];
 {
-    return( mmt[cube->r1][cube->g1][cube->b1]
-	   -mmt[cube->r1][cube->g1][cube->b0]
-	   -mmt[cube->r1][cube->g0][cube->b1]
-	   +mmt[cube->r1][cube->g0][cube->b0]
-	   -mmt[cube->r0][cube->g1][cube->b1]
-	   +mmt[cube->r0][cube->g1][cube->b0]
-	   +mmt[cube->r0][cube->g0][cube->b1]
-	   -mmt[cube->r0][cube->g0][cube->b0] );
+    return( mmt[cube->r1*33*33 + cube->g1*33 + cube->b1]
+	   -mmt[cube->r1*33*33 + cube->g1*33 + cube->b0]
+	   -mmt[cube->r1*33*33 + cube->g0*33 + cube->b1]
+	   +mmt[cube->r1*33*33 + cube->g0*33 + cube->b0]
+	   -mmt[cube->r0*33*33 + cube->g1*33 + cube->b1]
+	   +mmt[cube->r0*33*33 + cube->g1*33 + cube->b0]
+	   +mmt[cube->r0*33*33 + cube->g0*33 + cube->b1]
+	   -mmt[cube->r0*33*33 + cube->g0*33 + cube->b0] );
 }
 
 /* The next two routines allow a slightly more efficient calculation
@@ -151,85 +137,79 @@ long int mmt[33][33][33];
  * and with the specified new upper bound.
  */
 
-long int Bottom(cube, dir, mmt)
+static long int Bottom(struct box *cube, unsigned char dir, long int *mmt)
 /* Compute part of Vol(cube, mmt) that doesn't depend on r1, g1, or b1 */
 /* (depending on dir) */
-struct box *cube;
-unsigned char dir;
-long int mmt[33][33][33];
 {
     switch(dir){
 	case RED:
-	    return( -mmt[cube->r0][cube->g1][cube->b1]
-		    +mmt[cube->r0][cube->g1][cube->b0]
-		    +mmt[cube->r0][cube->g0][cube->b1]
-		    -mmt[cube->r0][cube->g0][cube->b0] );
+	    return( -mmt[cube->r0*33*33 + cube->g1*33 + cube->b1]
+		    +mmt[cube->r0*33*33 + cube->g1*33 + cube->b0]
+		    +mmt[cube->r0*33*33 + cube->g0*33 + cube->b1]
+		    -mmt[cube->r0*33*33 + cube->g0*33 + cube->b0] );
 	    break;
 	case GREEN:
-	    return( -mmt[cube->r1][cube->g0][cube->b1]
-		    +mmt[cube->r1][cube->g0][cube->b0]
-		    +mmt[cube->r0][cube->g0][cube->b1]
-		    -mmt[cube->r0][cube->g0][cube->b0] );
+	    return( -mmt[cube->r1*33*33 + cube->g0*33 + cube->b1]
+		    +mmt[cube->r1*33*33 + cube->g0*33 + cube->b0]
+		    +mmt[cube->r0*33*33 + cube->g0*33 + cube->b1]
+		    -mmt[cube->r0*33*33 + cube->g0*33 + cube->b0] );
 	    break;
 	case BLUE:
-	    return( -mmt[cube->r1][cube->g1][cube->b0]
-		    +mmt[cube->r1][cube->g0][cube->b0]
-		    +mmt[cube->r0][cube->g1][cube->b0]
-		    -mmt[cube->r0][cube->g0][cube->b0] );
+	    return( -mmt[cube->r1*33*33 + cube->g1*33 + cube->b0]
+		    +mmt[cube->r1*33*33 + cube->g0*33 + cube->b0]
+		    +mmt[cube->r0*33*33 + cube->g1*33 + cube->b0]
+		    -mmt[cube->r0*33*33 + cube->g0*33 + cube->b0] );
 	    break;
     }
+	__builtin_unreachable();
 }
 
 
-long int Top(cube, dir, pos, mmt)
+static long int Top(struct box *cube, unsigned char dir, int pos, long int *mmt)
 /* Compute remainder of Vol(cube, mmt), substituting pos for */
 /* r1, g1, or b1 (depending on dir) */
-struct box *cube;
-unsigned char dir;
-int   pos;
-long int mmt[33][33][33];
 {
     switch(dir){
 	case RED:
-	    return( mmt[pos][cube->g1][cube->b1]
-		   -mmt[pos][cube->g1][cube->b0]
-		   -mmt[pos][cube->g0][cube->b1]
-		   +mmt[pos][cube->g0][cube->b0] );
+	    return( mmt[pos*33*33 + cube->g1*33 + cube->b1]
+		   -mmt[pos*33*33 + cube->g1*33 + cube->b0]
+		   -mmt[pos*33*33 + cube->g0*33 + cube->b1]
+		   +mmt[pos*33*33 + cube->g0*33 + cube->b0] );
 	    break;
 	case GREEN:
-	    return( mmt[cube->r1][pos][cube->b1]
-		   -mmt[cube->r1][pos][cube->b0]
-		   -mmt[cube->r0][pos][cube->b1]
-		   +mmt[cube->r0][pos][cube->b0] );
+	    return( mmt[cube->r1*33*33 + pos*33 + cube->b1]
+		   -mmt[cube->r1*33*33 + pos*33 + cube->b0]
+		   -mmt[cube->r0*33*33 + pos*33 + cube->b1]
+		   +mmt[cube->r0*33*33 + pos*33 + cube->b0] );
 	    break;
 	case BLUE:
-	    return( mmt[cube->r1][cube->g1][pos]
-		   -mmt[cube->r1][cube->g0][pos]
-		   -mmt[cube->r0][cube->g1][pos]
-		   +mmt[cube->r0][cube->g0][pos] );
+	    return( mmt[cube->r1*33*33 + cube->g1*33 + pos]
+		   -mmt[cube->r1*33*33 + cube->g0*33 + pos]
+		   -mmt[cube->r0*33*33 + cube->g1*33 + pos]
+		   +mmt[cube->r0*33*33 + cube->g0*33 + pos] );
 	    break;
     }
+	__builtin_unreachable();
 }
 
 
-float Var(cube)
+static float Var(struct box *cube, float *m2, long int *wt, long int *mr, long int *mg, long int *mb)
 /* Compute the weighted variance of a box */
-/* NB: as with the raw statistics, this is really the variance * size */
-struct box *cube;
+/* NB: as with the raw statistics, this is really the variance * pixelCount */
 {
 float dr, dg, db, xx;
 
     dr = Vol(cube, mr);
     dg = Vol(cube, mg);
     db = Vol(cube, mb);
-    xx =  m2[cube->r1][cube->g1][cube->b1]
-	 -m2[cube->r1][cube->g1][cube->b0]
-	 -m2[cube->r1][cube->g0][cube->b1]
-	 +m2[cube->r1][cube->g0][cube->b0]
-	 -m2[cube->r0][cube->g1][cube->b1]
-	 +m2[cube->r0][cube->g1][cube->b0]
-	 +m2[cube->r0][cube->g0][cube->b1]
-	 -m2[cube->r0][cube->g0][cube->b0];
+    xx =  m2[cube->r1*33*33 + cube->g1*33 + cube->b1]
+	 -m2[cube->r1*33*33 + cube->g1*33 + cube->b0]
+	 -m2[cube->r1*33*33 + cube->g0*33 + cube->b1]
+	 +m2[cube->r1*33*33 + cube->g0*33 + cube->b0]
+	 -m2[cube->r0*33*33 + cube->g1*33 + cube->b1]
+	 +m2[cube->r0*33*33 + cube->g1*33 + cube->b0]
+	 +m2[cube->r0*33*33 + cube->g0*33 + cube->b1]
+	 -m2[cube->r0*33*33 + cube->g0*33 + cube->b0];
 
     return( xx - (dr*dr+dg*dg+db*db)/(float)Vol(cube,wt) );
 }
@@ -242,12 +222,9 @@ float dr, dg, db, xx;
  */
 
 
-float Maximize(cube, dir, first, last, cut,
-		whole_r, whole_g, whole_b, whole_w)
-struct box *cube;
-unsigned char dir;
-int first, last, *cut;
-long int whole_r, whole_g, whole_b, whole_w;
+static float Maximize(struct box *cube, unsigned char dir, int first, int last, int *cut,
+		long int whole_r, long int whole_g, long int whole_b, long int whole_w,
+		long int *wt, long int *mr, long int *mg, long int *mb)
 {
 register long int half_r, half_g, half_b, half_w;
 long int base_r, base_g, base_b, base_w;
@@ -287,9 +264,8 @@ register float temp, max;
     return(max);
 }
 
-int
-Cut(set1, set2)
-struct box *set1, *set2;
+static int
+Cut(struct box *set1, struct box *set2, long int *wt, long int *mr, long int *mg, long int *mb)
 {
 unsigned char dir;
 int cutr, cutg, cutb;
@@ -302,11 +278,14 @@ long int whole_r, whole_g, whole_b, whole_w;
     whole_w = Vol(set1, wt);
 
     maxr = Maximize(set1, RED, set1->r0+1, set1->r1, &cutr,
-		    whole_r, whole_g, whole_b, whole_w);
+		    whole_r, whole_g, whole_b, whole_w,
+		    wt, mr, mg, mb);
     maxg = Maximize(set1, GREEN, set1->g0+1, set1->g1, &cutg,
-		    whole_r, whole_g, whole_b, whole_w);
+		    whole_r, whole_g, whole_b, whole_w,
+		    wt, mr, mg, mb);
     maxb = Maximize(set1, BLUE, set1->b0+1, set1->b1, &cutb,
-		    whole_r, whole_g, whole_b, whole_w);
+		    whole_r, whole_g, whole_b, whole_w,
+		    wt, mr, mg, mb);
 
     if( (maxr>=maxg)&&(maxr>=maxb) ) {
 	dir = RED;
@@ -345,6 +324,7 @@ long int whole_r, whole_g, whole_b, whole_w;
 }
 
 
+static void
 Mark(cube, label, tag)
 struct box *cube;
 int label;
@@ -358,35 +338,42 @@ register int r, g, b;
 	    tag[(r<<10) + (r<<6) + r + (g<<5) + g + b] = label;
 }
 
-main()
+bool wuquant(unsigned char *imageData, unsigned int pixelCount, unsigned int targetColors, unsigned char *outputPalette)
 {
 struct box	cube[MAXCOLOR];
 unsigned char	*tag;
-unsigned char	lut_r[MAXCOLOR], lut_g[MAXCOLOR], lut_b[MAXCOLOR];
 int		next;
 register long int	i, weight;
 register int	k;
 float		vv[MAXCOLOR], temp;
 
-	/* input R,G,B components into Ir, Ig, Ib;
-	   set size to width*height */
+	/* Histogram is in elements 1..HISTSIZE along each axis,
+	* element 0 is for base or marginal value
+	* NB: these must start out 0!
+	*/
+	float		*m2 = calloc(33 * 33 * 33, sizeof(float));
+	long int	*wt = calloc(33 * 33 * 33, sizeof(long int));
+	long int	*mr = calloc(33 * 33 * 33, sizeof(long int));
+	long int	*mg = calloc(33 * 33 * 33, sizeof(long int));
+	long int	*mb = calloc(33 * 33 * 33, sizeof(long int));
+	if (!m2 || !wt || !mr || !mg || !mb)
+	{
+		fprintf(stderr, "[wuquant] error: out of memory\n");
+		return false;
+	}
 
-	printf("no. of colors:\n");
-	scanf("%d", &K);
+	Hist3d(imageData, pixelCount, wt, mr, mg, mb, m2);
 
-	Hist3d(wt, mr, mg, mb, m2); printf("Histogram done\n");
-	free(Ig); free(Ib); free(Ir);
-
-	M3d(wt, mr, mg, mb, m2);    printf("Moments done\n");
+	M3d(wt, mr, mg, mb, m2);
 
 	cube[0].r0 = cube[0].g0 = cube[0].b0 = 0;
 	cube[0].r1 = cube[0].g1 = cube[0].b1 = 32;
 	next = 0;
-        for(i=1; i<K; ++i){
-            if (Cut(&cube[next], &cube[i])) {
+        for(i=1; i<targetColors; ++i){
+            if (Cut(&cube[next], &cube[i], wt, mr, mg, mb)) {
               /* volume test ensures we won't try to cut one-cell box */
-              vv[next] = (cube[next].vol>1) ? Var(&cube[next]) : 0.0;
-              vv[i] = (cube[i].vol>1) ? Var(&cube[i]) : 0.0;
+              vv[next] = (cube[next].vol>1) ? Var(&cube[next], m2, wt, mr, mg, mb) : 0.0;
+              vv[i] = (cube[i].vol>1) ? Var(&cube[i], m2, wt, mr, mg, mb) : 0.0;
 	    } else {
               vv[next] = 0.0;   /* don't try to split this box again */
               i--;              /* didn't create box i */
@@ -397,33 +384,33 @@ float		vv[MAXCOLOR], temp;
                     temp = vv[k]; next = k;
 		}
             if (temp <= 0.0) {
-              K = i+1;
-              fprintf(stderr, "Only got %d boxes\n", K);
+              targetColors = i+1;
+              fprintf(stderr, "[wuquant] warning: only got %d boxes\n", targetColors);
               break;
 	    }
 	}
-    	printf("Partition done\n");
 
-	/* the space for array m2 can be freed now */
+	free(m2);
 
 	tag = (unsigned char *)malloc(33*33*33);
-	if (tag==NULL) {printf("Not enough space\n"); exit(1);}
-	for(k=0; k<K; ++k){
+	if (!tag)
+	{
+		fprintf(stderr, "[wuquant] error: out of memory\n");
+		return false;
+	}
+	for(k=0; k<targetColors; ++k){
 	    Mark(&cube[k], k, tag);
 	    weight = Vol(&cube[k], wt);
 	    if (weight) {
-		lut_r[k] = Vol(&cube[k], mr) / weight;
-		lut_g[k] = Vol(&cube[k], mg) / weight;
-		lut_b[k] = Vol(&cube[k], mb) / weight;
+		outputPalette[k * 3 + 0] = Vol(&cube[k], mr) / weight;
+		outputPalette[k * 3 + 1] = Vol(&cube[k], mg) / weight;
+		outputPalette[k * 3 + 2] = Vol(&cube[k], mb) / weight;
 	    }
 	    else{
 	      fprintf(stderr, "bogus box %d\n", k);
-	      lut_r[k] = lut_g[k] = lut_b[k] = 0;
+	      outputPalette[k * 3 + 0] = outputPalette[k * 3 + 1] = outputPalette[k * 3 + 2] = 0;
 	    }
 	}
 
-	for(i=0; i<size; ++i) Qadd[i] = tag[Qadd[i]];
-
-	/* output lut_r, lut_g, lut_b as color look-up table contents,
-	   Qadd as the quantized image (array of table addresses). */
+	return true;
 }
