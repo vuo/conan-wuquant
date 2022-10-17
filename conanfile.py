@@ -6,7 +6,7 @@ class WuQuantConan(ConanFile):
     name = 'wuquant'
 
     source_version = '2.0.0'
-    package_version = '0'
+    package_version = '1'
     version = '%s-%s' % (source_version, package_version)
 
     build_requires = (

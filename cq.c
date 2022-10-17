@@ -338,7 +338,7 @@ register int r, g, b;
 	    tag[(r<<10) + (r<<6) + r + (g<<5) + g + b] = label;
 }
 
-bool wuquant(unsigned char *imageData, unsigned int pixelCount, unsigned int targetColors, unsigned char *outputPalette)
+bool wuquant(const unsigned char *imageData, unsigned int pixelCount, unsigned int targetColors, unsigned char *outputPalette)
 {
 struct box	cube[MAXCOLOR];
 unsigned char	*tag;
