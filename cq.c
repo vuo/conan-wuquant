@@ -40,7 +40,7 @@ struct box {
 };
 
 static void
-Hist3d(unsigned char *imageData, unsigned int pixelCount, long int *vwt, long int *vmr, long int *vmg, long int *vmb, float *m2)
+Hist3d(const unsigned char *imageData, unsigned int pixelCount, long int *vwt, long int *vmr, long int *vmg, long int *vmb, float *m2)
 /* build 3-D color histogram of counts, r/g/b, c^2 */
 {
 register int ind, r, g, b;
@@ -407,10 +407,16 @@ float		vv[MAXCOLOR], temp;
 		outputPalette[k * 3 + 2] = Vol(&cube[k], mb) / weight;
 	    }
 	    else{
-	      fprintf(stderr, "bogus box %d\n", k);
+	      fprintf(stderr, "[wuquant] bogus box %d\n", k);
 	      outputPalette[k * 3 + 0] = outputPalette[k * 3 + 1] = outputPalette[k * 3 + 2] = 0;
 	    }
 	}
+
+	free(wt);
+	free(mr);
+	free(mg);
+	free(mb);
+	free(tag);
 
 	return true;
 }
